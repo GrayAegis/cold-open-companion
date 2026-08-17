@@ -232,13 +232,20 @@ const TIERS = {
             /Ban List/i, /Dialogue Craft/i, /Minor NPCs/i, /NPC Initiative/i, /The World Can Win/i] },
 };
 
+/**
+ * Modules a tier must never touch. De-slop encodes which model you are running;
+ * Variety Seed encodes whether you want the randomiser. Neither is a statement
+ * about how deep the prose should go, so Lean/Standard/Deep leave both alone.
+ */
+const TIER_EXEMPT = /De-slop|Variety Seed/i;
+
 function tierChanges(model, tierName) {
     const tier = TIERS[tierName];
     const changes = {};
     for (const e of allEntries(model)) {
         if (/Directive\s*—/i.test(e.raw)) changes[e.id] = tier.directive.test(e.raw);
         else if (/CoT\s*—/i.test(e.raw)) changes[e.id] = !!tier.cot && tier.cot.test(e.raw);
-        else if (e.kind === 'additive' && /De-slop/i.test(e.raw)) continue;   // user's model choice
+        else if (e.kind === 'additive' && TIER_EXEMPT.test(e.raw)) continue;  // taste, not depth
         else if (e.kind === 'additive' && tier.craft.some(rx => rx.test(e.raw))) changes[e.id] = true;
         else if (e.kind === 'additive' && isCraftModule(model, e.id)) changes[e.id] = false;
     }
@@ -254,6 +261,41 @@ function isCraftModule(model, id) {
         }
     }
     return false;
+}
+
+/**
+ * A tier is "on" when its Directive and its reasoning block are the ones
+ * selected — those two define it. The craft load is compared separately so a
+ * tier you have since tweaked reads as active-but-modified rather than off.
+ */
+function activeTier(model) {
+    const entries = allEntries(model);
+    const cots = entries.filter(e => /CoT\s*—/i.test(e.raw));
+    for (const [name, tier] of Object.entries(TIERS)) {
+        const dir = entries.find(e => /Directive\s*—/i.test(e.raw) && tier.directive.test(e.raw));
+        if (!dir?.enabled) continue;
+        const cotOk = tier.cot
+            ? cots.some(e => e.enabled && tier.cot.test(e.raw))
+            : !cots.some(e => e.enabled);
+        if (cotOk) return name;
+    }
+    return null;
+}
+
+/** True when nothing has drifted since the tier was applied. */
+function tierIsClean(model, name) {
+    const current = new Map(allEntries(model).map(e => [e.id, e.enabled]));
+    return Object.entries(tierChanges(model, name))
+        .every(([id, want]) => current.get(id) === want);
+}
+
+function activeModels(model) {
+    const out = [];
+    for (const e of allEntries(model)) {
+        const m = /De-slop:\s*(\w+)/i.exec(e.raw);
+        if (m && e.enabled) out.push(m[1]);
+    }
+    return out;
 }
 
 const MODELS = ['DeepSeek', 'GLM', 'Kimi', 'Claude', 'Gemini', 'GPT'];
@@ -293,7 +335,30 @@ async function refreshCounts(model) {
     }
     const totalEl = document.getElementById('coldopen_total');
     if (totalEl) totalEl.textContent = `≈${total} tokens enabled`;
-    refreshCaps(model);
+}
+
+/** Show which tier and which model family are actually live right now. */
+function refreshToolbar(model) {
+    const tier = activeTier(model);
+    const clean = tier ? tierIsClean(model, tier) : false;
+
+    for (const b of document.querySelectorAll('[data-co-tier]')) {
+        const on = b.dataset.coTier === tier;
+        b.classList.toggle('coldopen-btn-on', on);
+        b.classList.toggle('coldopen-btn-drifted', on && !clean);
+        b.title = on
+            ? (clean
+                ? `Currently active.\n\n${b.dataset.coBase}`
+                : `Currently active, but modules have changed since you applied it — click to restore the full ${b.dataset.coTier} load.\n\n${b.dataset.coBase}`)
+            : b.dataset.coBase;
+    }
+
+    const families = activeModels(model);
+    for (const b of document.querySelectorAll('[data-co-model]')) {
+        const on = families.includes(b.dataset.coModel);
+        b.classList.toggle('coldopen-btn-on', on);
+        b.title = on ? `Currently active.\n\n${b.dataset.coBase}` : b.dataset.coBase;
+    }
 }
 
 /** Live "2/2" chips on capped groups, flagged when the preset arrives over cap. */
@@ -411,6 +476,9 @@ function syncPanel() {
     const model = buildModel();
     if (!model || signature(model) !== lastSignature) return renderPanel();
 
+    refreshCaps(model);
+    refreshToolbar(model);
+
     const byId = new Map(allEntries(model).map(e => [e.id, e]));
     for (const box of host.querySelectorAll('input[data-co-id]')) {
         const entry = byId.get(box.dataset.coId);
@@ -446,14 +514,18 @@ function renderPanel() {
     bar.append(el('span', 'coldopen-bar-label', 'Tier'));
     for (const name of Object.keys(TIERS)) {
         const b = el('button', 'menu_button coldopen-btn', name);
-        b.title = `Set the Directive, craft modules and reasoning for ${name}. Systems and De-slop are left as you have them.`;
+        b.dataset.coTier = name;
+        b.dataset.coBase = `Set the Directive, craft modules and reasoning for ${name}. Systems, De-slop and Variety Seed are left as you have them.`;
+        b.title = b.dataset.coBase;
         b.addEventListener('click', () => applyChanges(tierChanges(buildModel(), name)));
         bar.append(b);
     }
     bar.append(el('span', 'coldopen-bar-label', 'Model'));
     for (const m of MODELS) {
         const b = el('button', 'menu_button coldopen-btn coldopen-btn-sm', m);
-        b.title = `Enable De-slop: ${m} and disable the other families.`;
+        b.dataset.coModel = m;
+        b.dataset.coBase = `Enable De-slop: ${m} and disable the other families.`;
+        b.title = b.dataset.coBase;
         b.addEventListener('click', () => applyChanges(deslopChanges(buildModel(), m)));
         bar.append(b);
     }
@@ -515,6 +587,10 @@ function renderPanel() {
         host.append(drawer);
     }
 
+    // Marking which tier and model are live must not wait on the tokenizer —
+    // refreshCounts awaits an estimate per entry and lands a beat later.
+    refreshCaps(model);
+    refreshToolbar(model);
     refreshCounts(model);
 }
 

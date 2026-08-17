@@ -303,3 +303,26 @@
 }
 
 .coldopen-carry-row { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; }
+
+/* ─────────────────────────────────────────── active tier / model */
+
+.coldopen-btn-on {
+    color: var(--golden, #d9a441);
+    border-color: rgba(217, 164, 65, .75);
+    background: rgba(217, 164, 65, .16);
+    font-weight: 600;
+}
+
+.coldopen-btn-on:hover { background: rgba(217, 164, 65, .24); }
+
+/* active, but the module load has drifted since it was applied */
+.coldopen-btn-drifted {
+    border-style: dashed;
+    background: rgba(217, 164, 65, .08);
+}
+
+.coldopen-btn-drifted::after {
+    content: '*';
+    opacity: .8;
+    margin-left: 2px;
+}
