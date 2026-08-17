@@ -357,21 +357,25 @@ function pendingCarry(model) {
     const prev = settings().loadout;
     if (!prev?.entries || prev.preset === presetName()) return null;
 
-    const here = new Map(allEntries(model).map(e => [e.id, e]));
-    const shared = Object.keys(prev.entries).filter(id => here.has(id));
+    const all = new Map(allEntries(model).map(e => [e.id, e]));
+
+    // Must use the same filter snapshotLoadout does. Structural plumbing and
+    // markers are never snapshotted, so comparing them against the snapshot
+    // reports every wrapper and reset entry as "new" on every upgrade.
+    const toggleable = new Map([...all].filter(([, e]) => e.kind !== 'structural' && !e.marker));
+
+    const shared = Object.keys(prev.entries).filter(id => toggleable.has(id));
     if (!shared.length) return null;
 
-    const differing = shared.filter(id => {
-        const e = here.get(id);
-        return e.kind !== 'structural' && !e.marker && e.enabled !== prev.entries[id].on;
-    });
+    const differing = shared.filter(id => toggleable.get(id).enabled !== prev.entries[id].on);
     if (!differing.length) return null;
 
     return {
         from: prev.preset,
         differing,
-        added: [...here.keys()].filter(id => !(id in prev.entries)),
-        gone: Object.keys(prev.entries).filter(id => !here.has(id))
+        added: [...toggleable.keys()].filter(id => !(id in prev.entries)),
+        // `all`, not `toggleable`: an entry that became structural still exists.
+        gone: Object.keys(prev.entries).filter(id => !all.has(id))
             .map(id => prev.entries[id].name),
     };
 }
