@@ -127,7 +127,7 @@ async function applyChanges(changes) {
             console.error('[COLD OPEN] failed to toggle', id, err);
         }
     }
-    if (applied) renderPanel();
+    if (applied) syncPanel();
     return applied;
 }
 
@@ -248,17 +248,63 @@ function el(tag, cls, text) {
     return n;
 }
 
+/**
+ * Which section drawers you left open. ST's `.inline-drawer-content` is
+ * display:none by default, so a rebuilt panel collapses everything unless we
+ * put it back — and a rebuild happens on every toggle.
+ */
+const openSections = new Set();
+
+/**
+ * Identity of the panel's *shape* — sections, groups, entry ids. Enabled
+ * flags are deliberately excluded: flipping a switch must not count as a
+ * structural change, or we'd rebuild for the very thing sync handles.
+ */
+function signature(model) {
+    return model
+        .map(s => `${s.name}[${s.groups.map(g => g.name).join('~')}]:` +
+            [...s.loose, ...s.groups.flatMap(g => g.entries)].map(e => e.id).join(','))
+        .join('|');
+}
+
+let lastSignature = null;
+
+/**
+ * Update checkboxes and counts in place. No DOM teardown, so open drawers stay
+ * open, scroll position holds, and nothing flickers. Falls back to a full
+ * render when the preset's shape actually changed.
+ */
+function syncPanel() {
+    const host = document.getElementById(PANEL);
+    if (!host) return;
+    const model = buildModel();
+    if (!model || signature(model) !== lastSignature) return renderPanel();
+
+    const byId = new Map(allEntries(model).map(e => [e.id, e]));
+    for (const box of host.querySelectorAll('input[data-co-id]')) {
+        const entry = byId.get(box.dataset.coId);
+        if (entry) box.checked = entry.enabled;
+    }
+    refreshCounts(model);
+}
+
 function renderPanel() {
     const host = document.getElementById(PANEL);
     if (!host) return;
+
+    const scroller = host.closest('.coldopen-window-body');
+    const scrollTop = scroller ? scroller.scrollTop : 0;
     host.innerHTML = '';
 
     const model = buildModel();
     if (!model) {
+        lastSignature = null;
         host.append(el('div', 'coldopen-empty',
             'No COLD OPEN preset detected. Load one in AI Response Configuration and this panel fills in.'));
         return;
     }
+    lastSignature = signature(model);
+    if (scroller) requestAnimationFrame(() => { scroller.scrollTop = scrollTop; });
 
     // toolbar
     const bar = el('div', 'coldopen-bar');
@@ -291,10 +337,25 @@ function renderPanel() {
         const count = el('small', 'coldopen-count');
         count.setAttribute('data-co-section-count', section.name);
         head.append(count);
-        head.append(el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down'));
+        const icon = el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down');
+        head.append(icon);
         drawer.append(head);
 
         const body = el('div', 'inline-drawer-content');
+
+        // ST's delegated handler does the animating; we only remember the outcome.
+        const name = section.name;
+        head.addEventListener('click', () => {
+            if (openSections.has(name)) openSections.delete(name);
+            else openSections.add(name);
+            settings().open = [...openSections];
+            save();
+        });
+
+        if (openSections.has(name)) {
+            body.style.display = 'block';
+            icon.className = 'inline-drawer-icon fa-solid fa-circle-chevron-up up';
+        }
 
         for (const item of section.loose) body.append(renderEntry(item, null, model));
         for (const group of section.groups) {
@@ -339,6 +400,7 @@ function renderEntry(item, group, model) {
     box.type = item.kind === 'radio' ? 'radio' : 'checkbox';
     if (item.kind === 'radio' && group) box.name = `coldopen_${group.name.replace(/\W+/g, '_')}`;
     box.checked = item.enabled;
+    box.dataset.coId = item.id;
 
     box.addEventListener('change', async () => {
         const fresh = buildModel();
@@ -374,6 +436,7 @@ function settings() {
     if (typeof s.locked !== 'boolean') s.locked = true;
     s.window ??= { x: null, y: null, w: 380, h: 540, open: false };
     s.launcher ??= { x: null, y: null };
+    s.open ??= [];
     s.version = 2;
     return s;
 }
@@ -622,6 +685,8 @@ function mountDrawerStub() {
     settings();
     c.saveSettingsDebounced();
 
+    for (const name of settings().open) openSections.add(name);
+
     mountDrawerStub();
     buildLauncher();
 
@@ -644,7 +709,7 @@ function mountDrawerStub() {
 
     const ev = c.eventSource, t = c.eventTypes;
     const refresh = () => {
-        if (settings().window.open) renderPanel();
+        if (settings().window.open) syncPanel();
         attach();
         paintLock();
     };
