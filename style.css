@@ -99,3 +99,137 @@
     padding: 0 6px;
     white-space: nowrap;
 }
+
+/* ─────────────────────────────────────────── floating launcher + window */
+
+.coldopen-launcher {
+    position: fixed;
+    right: 12px;
+    top: 45%;
+    z-index: 3000;
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    cursor: grab;
+    touch-action: none;
+    color: var(--SmartThemeBodyColor, #ddd);
+    background: var(--SmartThemeBlurTintColor, rgba(20, 20, 20, .85));
+    border: 1px solid rgba(128, 128, 128, .4);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, .45);
+    opacity: .75;
+    transition: opacity .15s, transform .15s;
+}
+
+.coldopen-launcher:hover { opacity: 1; transform: scale(1.06); }
+.coldopen-launcher.coldopen-dragging { cursor: grabbing; opacity: 1; }
+.coldopen-launcher i { font-size: .95em; pointer-events: none; }
+
+.coldopen-window {
+    position: fixed;
+    right: 56px;
+    top: 12%;
+    z-index: 3001;
+    display: flex;
+    flex-direction: column;
+    min-width: 290px;
+    min-height: 220px;
+    max-width: 96vw;
+    max-height: 92vh;
+    overflow: hidden;
+    resize: both;
+    border-radius: 10px;
+    color: var(--SmartThemeBodyColor, #ddd);
+    background: var(--SmartThemeBlurTintColor, rgba(20, 20, 20, .94));
+    backdrop-filter: blur(var(--SmartThemeBlurStrength, 10px));
+    border: 1px solid rgba(128, 128, 128, .4);
+    box-shadow: 0 6px 28px rgba(0, 0, 0, .55);
+}
+
+.coldopen-window.coldopen-dragging { user-select: none; }
+
+.coldopen-window-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 10px;
+    cursor: grab;
+    touch-action: none;
+    flex: none;
+    border-bottom: 1px solid rgba(128, 128, 128, .28);
+}
+
+.coldopen-window.coldopen-dragging .coldopen-window-head { cursor: grabbing; }
+.coldopen-window-icon { opacity: .8; font-size: .9em; }
+.coldopen-window-title { font-size: .92em; letter-spacing: .06em; }
+.coldopen-spacer { flex: 1; }
+
+.coldopen-lockbtn,
+.coldopen-close {
+    cursor: pointer;
+    opacity: .6;
+    padding: 3px 5px;
+    border-radius: 4px;
+    font-size: .9em;
+}
+
+.coldopen-lockbtn:hover,
+.coldopen-close:hover { opacity: 1; background: rgba(128, 128, 128, .18); }
+.coldopen-lockbtn.fa-lock { color: var(--golden, #d9a441); opacity: .85; }
+
+.coldopen-window-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 12px 12px;
+}
+
+/* ─────────────────────────────────────────── locked prompt manager */
+
+#completion_prompt_manager.coldopen-pm-locked .prompt-manager-toggle-action,
+#completion_prompt_manager.coldopen-pm-locked .prompt-manager-edit-action,
+#completion_prompt_manager.coldopen-pm-locked .prompt-manager-detach-action,
+#completion_prompt_manager.coldopen-pm-locked .drag-handle {
+    opacity: .3;
+    cursor: not-allowed;
+}
+
+#completion_prompt_manager.coldopen-pm-locked {
+    position: relative;
+    outline: 1px dashed rgba(217, 164, 65, .35);
+    outline-offset: 3px;
+    border-radius: 4px;
+}
+
+#completion_prompt_manager.coldopen-pm-refused {
+    animation: coldopen-refuse .32s ease;
+}
+
+@keyframes coldopen-refuse {
+    0%, 100% { outline-color: rgba(217, 164, 65, .35); }
+    50% { outline-color: rgba(217, 164, 65, .95); }
+}
+
+/* ─────────────────────────────────────────── drawer stub */
+
+.coldopen-stub-row { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0 8px; }
+
+.coldopen-stub-lock {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    font-size: .92em;
+    padding: 2px 0;
+}
+
+.coldopen-stub-lock input { margin: 0; cursor: pointer; }
+
+.coldopen-stub-note {
+    display: block;
+    opacity: .6;
+    font-size: .8em;
+    line-height: 1.5;
+    padding-top: 6px;
+}

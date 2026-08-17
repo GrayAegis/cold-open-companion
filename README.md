@@ -6,6 +6,8 @@ COLD OPEN's entry names carry a deliberate grammar — `❮ section ❯`, `░ r
 
 ## What it does
 
+- **A floating panel.** A draggable clapperboard button sits at the edge of the chat; click it and the panel opens in a movable, resizable window. Both remember where you put them. The extensions drawer keeps only a stub — open the panel, reset its position, and the lock switch.
+- **The Prompt Manager is locked.** While a COLD OPEN preset is loaded, the native list's toggles, edit, detach and drag-reorder are refused, so the panel stays the single source of truth and nothing can quietly break the grammar. Inspection, scrolling and token counts still work. Unlock it from the panel header or the drawer when you want raw access.
 - **Real radio groups.** Picking a Narrator Register, POV, Length, Directive, or CoT style switches its siblings off. No more two Registers fighting each other because the menus were "enforced by convention".
 - **Dependencies handled.** Turning on any tracker enables `✚✚ Tracker Grammar` for you.
 - **Tier buttons.** Lean / Standard / Deep set the Directive, the craft load, and the reasoning block in one click. They deliberately leave Systems and your De-slop choice alone — enabling everything is the documented way to make a preset worse.
@@ -23,10 +25,16 @@ The panel appears in the extensions settings drawer. It fills in automatically w
 
 Every state change goes through the `/setpromptentry` slash command rather than touching SillyTavern internals — that command clears the token-count cache, re-renders the Prompt Manager, and saves, so the panel and the native UI can never disagree. Reads come from `getContext().chatCompletionSettings`, fetched fresh each time because a cached context goes stale after a chat switch.
 
-No state of its own beyond a version stamp: the preset remains the single source of truth, and the extension is pure convenience. Uninstalling it changes nothing about how the preset behaves.
+The lock is the one place this extension reaches for ST's DOM. It works by refusing events at the capture phase on `#completion_prompt_manager` before ST's own handlers see them — no overlay, no patched functions, no monkeypatching of `PromptManager`. It engages only while a COLD OPEN preset is loaded, so every other preset behaves exactly as it always did, and turning the extension off restores everything. The window drag is hand-rolled for the same reason: ST's `dragElement` lives in `RossAscends-mods.js` and isn't exposed on `getContext()`, and thirty lines of arithmetic beat an import from internals.
 
-Verified against SillyTavern 1.18.0. Requires nothing else.
+Its own state is only UI state — whether the lock is on, and where you dragged the window and launcher — kept in `extensionSettings.coldopen_companion`. Nothing about the preset is stored here; the preset remains the single source of truth. Uninstalling changes nothing about how the preset behaves, and unlocking is always one click away inside the app.
+
+Verified against SillyTavern 1.18.0, whose Prompt Manager markup the lock targets (`.prompt-manager-toggle-action`, `.prompt-manager-edit-action`, `.prompt-manager-detach-action`, `.drag-handle`). If a future ST renames those, the lock quietly stops locking — it fails open, never closed, and the panel keeps working regardless. Requires nothing else.
 
 ## Not in this version
 
-Sidecar tracker generation — offloading tracker evaluation to a separate cheap model so the main model spends its whole output budget on prose, and tracker state costs zero context. The plumbing for it (`ConnectionManagerRequestService`, `CHAT_COMPLETION_PROMPT_READY`) is confirmed available; it's a v0.2 job.
+Sidecar tracker generation — offloading tracker evaluation to a separate cheap model so the main model spends its whole output budget on prose, and tracker state costs zero context. The plumbing for it (`ConnectionManagerRequestService`, `CHAT_COMPLETION_PROMPT_READY`) is confirmed available; it's the next job.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

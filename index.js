@@ -362,40 +362,303 @@ function renderEntry(item, group, model) {
     return row;
 }
 
-// ─────────────────────────────────────────────────────────── boot
+// ─────────────────────────────────────────────────────────── settings
 
-function mount() {
-    if (document.getElementById(PANEL)) return;
-    const container = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
-    if (!container) return;
+const WINDOW = 'coldopen_window';
+const LAUNCHER = 'coldopen_launcher';
 
-    const drawer = el('div', 'coldopen-root inline-drawer');
-    const head = el('div', 'inline-drawer-toggle inline-drawer-header');
-    head.append(el('b', null, 'COLD OPEN'));
-    head.append(el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down'));
-    const body = el('div', 'inline-drawer-content');
+/** Live settings object, migrated forward from v1 in place. */
+function settings() {
+    const c = ctx();
+    const s = (c.extensionSettings[KEY] ??= {});
+    if (typeof s.locked !== 'boolean') s.locked = true;
+    s.window ??= { x: null, y: null, w: 380, h: 540, open: false };
+    s.launcher ??= { x: null, y: null };
+    s.version = 2;
+    return s;
+}
+
+const save = () => ctx().saveSettingsDebounced();
+
+// ─────────────────────────────────────────────────────────── preset lock
+
+/**
+ * The native Prompt Manager can't express the preset's grammar, so while a
+ * COLD OPEN preset is loaded we stop its mutating controls at the capture
+ * phase — before ST's own listeners see the event. Reads (inspect, scroll,
+ * token counts) are left alone, and everything unlocks the moment you flip
+ * the switch or load a different preset.
+ */
+const PM_ROOT = 'completion_prompt_manager';
+const PM_BLOCKED = [
+    '.prompt-manager-toggle-action',
+    '.prompt-manager-detach-action',
+    '.prompt-manager-edit-action',
+    '.drag-handle',
+].join(', ');
+
+/** Only lock when there is actually a COLD OPEN preset to protect. */
+function lockActive() {
+    return settings().locked && !!buildModel();
+}
+
+function guard(e) {
+    if (!lockActive()) return;
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    const root = t.closest(`#${PM_ROOT}`);
+    if (!root) return;
+
+    const isEntryControl = !!t.closest(PM_BLOCKED);
+    const isFooterControl = !!t.closest('[id^="completion_prompt_manager_footer"]');
+    if (!isEntryControl && !isFooterControl) return;   // inspect / scroll stay usable
+
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    if (e.type === 'pointerdown' || e.type === 'mousedown') nudge(root);
+}
+
+let nudgeTimer = null;
+function nudge(root) {
+    root.classList.add('coldopen-pm-refused');
+    clearTimeout(nudgeTimer);
+    nudgeTimer = setTimeout(() => root.classList.remove('coldopen-pm-refused'), 500);
+}
+
+/** Visual state only — the guard above is what actually enforces it. */
+function paintLock() {
+    const root = document.getElementById(PM_ROOT);
+    if (root) root.classList.toggle('coldopen-pm-locked', lockActive());
+    const btn = document.querySelector('.coldopen-lockbtn');
+    if (btn) {
+        const on = settings().locked;
+        btn.className = `coldopen-lockbtn fa-solid ${on ? 'fa-lock' : 'fa-lock-open'}`;
+        btn.title = on
+            ? 'Prompt Manager is locked. Changes go through this panel so the grammar holds. Click to unlock.'
+            : 'Prompt Manager is unlocked — raw editing, no grammar enforcement. Click to lock.';
+    }
+    const box = document.getElementById('coldopen_lock_toggle');
+    if (box) box.checked = settings().locked;
+}
+
+function toggleLock(next) {
+    const s = settings();
+    s.locked = next ?? !s.locked;
+    save();
+    paintLock();
+}
+
+// ─────────────────────────────────────────────────────────── floating UI
+
+/** Clamp to the viewport so a saved position can never strand the panel. */
+function place(node, x, y) {
+    const maxX = Math.max(0, window.innerWidth - node.offsetWidth);
+    const maxY = Math.max(0, window.innerHeight - node.offsetHeight);
+    node.style.left = `${Math.min(Math.max(0, x), maxX)}px`;
+    node.style.top = `${Math.min(Math.max(0, y), maxY)}px`;
+    node.style.right = 'auto';
+    node.style.bottom = 'auto';
+}
+
+/**
+ * Pointer-events drag. ST's own dragElement lives in RossAscends-mods.js and
+ * isn't on getContext(), so importing it would mean reaching into internals
+ * for thirty lines of arithmetic. This is those thirty lines.
+ */
+function draggable(handle, target, store, onClick) {
+    let id, sx, sy, ox, oy, travel;
+
+    handle.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || e.target.closest('.coldopen-nodrag')) return;
+        const r = target.getBoundingClientRect();
+        [id, sx, sy, ox, oy, travel] = [e.pointerId, e.clientX, e.clientY, r.left, r.top, 0];
+        handle.setPointerCapture(id);
+        target.classList.add('coldopen-dragging');
+        e.preventDefault();
+    });
+
+    handle.addEventListener('pointermove', e => {
+        if (e.pointerId !== id) return;
+        const dx = e.clientX - sx, dy = e.clientY - sy;
+        travel = Math.max(travel, Math.abs(dx) + Math.abs(dy));
+        place(target, ox + dx, oy + dy);
+    });
+
+    const release = e => {
+        if (e.pointerId !== id) return;
+        handle.releasePointerCapture(id);
+        id = undefined;
+        target.classList.remove('coldopen-dragging');
+        const r = target.getBoundingClientRect();
+        store.x = r.left;
+        store.y = r.top;
+        save();
+        if (travel < 5 && onClick) onClick();          // a tap, not a drag
+    };
+    handle.addEventListener('pointerup', release);
+    handle.addEventListener('pointercancel', release);
+}
+
+function buildWindow() {
+    const s = settings();
+    const win = el('div', 'coldopen-window');
+    win.id = WINDOW;
+
+    const head = el('div', 'coldopen-window-head');
+    head.append(el('i', 'fa-solid fa-clapperboard coldopen-window-icon'));
+    head.append(el('b', 'coldopen-window-title', 'COLD OPEN'));
+    head.append(el('span', 'coldopen-spacer'));
+
+    const lockBtn = el('i', 'coldopen-lockbtn fa-solid fa-lock coldopen-nodrag');
+    lockBtn.addEventListener('click', () => toggleLock());
+    head.append(lockBtn);
+
+    const close = el('i', 'coldopen-close fa-solid fa-xmark coldopen-nodrag');
+    close.title = 'Close';
+    close.addEventListener('click', () => showWindow(false));
+    head.append(close);
+
+    const body = el('div', 'coldopen-window-body');
     const panel = el('div');
     panel.id = PANEL;
     body.append(panel);
+
+    win.append(head, body);
+    document.body.append(win);
+
+    win.style.width = `${s.window.w}px`;
+    win.style.height = `${s.window.h}px`;
+    if (s.window.x != null) place(win, s.window.x, s.window.y);
+
+    draggable(head, win, s.window);
+
+    // CSS resize writes straight to the element; mirror it into settings.
+    new ResizeObserver(() => {
+        if (win.style.display === 'none') return;
+        s.window.w = win.offsetWidth;
+        s.window.h = win.offsetHeight;
+        save();
+    }).observe(win);
+
+    return win;
+}
+
+function buildLauncher() {
+    const s = settings();
+    const btn = el('div', 'coldopen-launcher');
+    btn.id = LAUNCHER;
+    btn.title = 'COLD OPEN — preset control panel';
+    btn.append(el('i', 'fa-solid fa-clapperboard'));
+    document.body.append(btn);
+
+    if (s.launcher.x != null) place(btn, s.launcher.x, s.launcher.y);
+    draggable(btn, btn, s.launcher, () => showWindow());
+    return btn;
+}
+
+function showWindow(next) {
+    const s = settings();
+    const win = document.getElementById(WINDOW) || buildWindow();
+    s.window.open = next ?? !s.window.open;
+    win.style.display = s.window.open ? 'flex' : 'none';
+    save();
+    if (s.window.open) {
+        renderPanel();
+        paintLock();
+    }
+}
+
+/** The drawer keeps a stub: a way back to the panel and the lock switch. */
+function mountDrawerStub() {
+    const container = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
+    if (!container || document.getElementById('coldopen_stub')) return;
+
+    const drawer = el('div', 'coldopen-root inline-drawer');
+    drawer.id = 'coldopen_stub';
+    const head = el('div', 'inline-drawer-toggle inline-drawer-header');
+    head.append(el('b', null, 'COLD OPEN'));
+    head.append(el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down'));
+
+    const body = el('div', 'inline-drawer-content');
+
+    const open = el('div', 'menu_button coldopen-btn', 'Open panel');
+    open.addEventListener('click', () => showWindow(true));
+
+    const reset = el('div', 'menu_button coldopen-btn', 'Reset position');
+    reset.addEventListener('click', () => {
+        const s = settings();
+        s.window.x = s.window.y = s.launcher.x = s.launcher.y = null;
+        s.window.w = 380;
+        s.window.h = 540;
+        save();
+        for (const id of [WINDOW, LAUNCHER]) document.getElementById(id)?.remove();
+        buildLauncher();
+        if (s.window.open) showWindow(true);
+    });
+
+    const row = el('div', 'coldopen-stub-row');
+    row.append(open, reset);
+
+    const lockRow = el('label', 'coldopen-stub-lock');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.id = 'coldopen_lock_toggle';
+    box.checked = settings().locked;
+    box.addEventListener('change', () => toggleLock(box.checked));
+    lockRow.append(box, el('span', null, 'Lock the native Prompt Manager'));
+
+    const note = el('small', 'coldopen-stub-note',
+        'While locked, the Prompt Manager’s toggles, edit, detach and drag-reorder are refused so the panel stays the single source of truth. Inspection and token counts still work. Unlocking hands you raw ST behaviour with no grammar enforcement.');
+
+    body.append(row, lockRow, note);
     drawer.append(head, body);
     container.append(drawer);
-
-    renderPanel();
 }
+
+// ─────────────────────────────────────────────────────────── boot
 
 (function init() {
     const c = ctx();
-    if (!c.extensionSettings[KEY]) {
-        c.extensionSettings[KEY] = { version: 1 };
-        c.saveSettingsDebounced();
+    settings();
+    c.saveSettingsDebounced();
+
+    mountDrawerStub();
+    buildLauncher();
+
+    const s = settings();
+    const win = buildWindow();
+    win.style.display = s.window.open ? 'flex' : 'none';
+    if (s.window.open) renderPanel();
+
+    for (const type of ['pointerdown', 'mousedown', 'click', 'change']) {
+        document.addEventListener(type, guard, true);
     }
 
-    mount();
+    // ST rebuilds the prompt list on every change; re-apply the visual state.
+    const observer = new MutationObserver(() => paintLock());
+    const attach = () => {
+        const root = document.getElementById(PM_ROOT);
+        if (root) observer.observe(root, { childList: true, subtree: true });
+    };
+    attach();
 
     const ev = c.eventSource, t = c.eventTypes;
-    const rerender = () => renderPanel();
-    for (const name of ['OAI_PRESET_CHANGED_AFTER', 'PRESET_CHANGED', 'CHAT_CHANGED', 'SETTINGS_UPDATED']) {
-        if (t[name]) ev.on(t[name], rerender);
+    const refresh = () => {
+        if (settings().window.open) renderPanel();
+        attach();
+        paintLock();
+    };
+    for (const name of ['OAI_PRESET_CHANGED_AFTER', 'PRESET_CHANGED', 'CHAT_CHANGED', 'SETTINGS_UPDATED', 'APP_READY']) {
+        if (t[name]) ev.on(t[name], refresh);
     }
+
+    window.addEventListener('resize', () => {
+        for (const id of [WINDOW, LAUNCHER]) {
+            const n = document.getElementById(id);
+            if (n && n.style.display !== 'none') place(n, n.offsetLeft, n.offsetTop);
+        }
+    });
+
+    paintLock();
     console.log('[COLD OPEN Companion] loaded');
 })();
