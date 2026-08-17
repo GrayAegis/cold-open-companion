@@ -127,7 +127,12 @@ async function applyChanges(changes) {
             console.error('[COLD OPEN] failed to toggle', id, err);
         }
     }
-    if (applied) syncPanel();
+    if (applied) {
+        syncPanel();
+        const fresh = buildModel();
+        const prev = settings().loadout;
+        if (fresh && (!prev || prev.preset === presetName())) snapshotLoadout(fresh);
+    }
     return applied;
 }
 
@@ -139,6 +144,57 @@ function radioChanges(group, chosenId) {
         changes[e.id] = e.id === chosenId;
     }
     return changes;
+}
+
+// ─────────────────────────────────────────────────────────── group caps
+
+const CAP_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+
+/**
+ * The cap is written into the grammar, not into this file: a group named
+ * `░ ⑤ Genre Lenses — additive, stack at most TWO` caps at two. Parse it, and
+ * any future capped group enforces itself without an extension release.
+ */
+function groupCap(group) {
+    const m = /at most\s+(one|two|three|four|five|six|\d+)/i.exec(group?.raw || '');
+    if (!m) return null;
+    const word = m[1].toLowerCase();
+    return CAP_WORDS[word] ?? (parseInt(word, 10) || null);
+}
+
+/** Additives currently on in a capped group. */
+function capEnabled(group) {
+    return group.entries.filter(e => e.kind === 'additive' && e.enabled);
+}
+
+/**
+ * Enabling past the cap evicts the *least recently enabled* member rather than
+ * refusing the click — picking a third lens should give you the third lens.
+ * Recency is remembered per group so the eviction order survives a reload.
+ */
+function capChanges(group, changedId) {
+    const cap = groupCap(group);
+    if (!cap) return {};
+
+    const s = settings();
+    const stacks = (s.stack ??= {});
+    const key = group.raw || group.name;
+
+    const order = (stacks[key] ?? []).filter(id => id !== changedId);
+    order.push(changedId);                                  // newest last
+
+    const live = group.entries
+        .filter(e => e.kind === 'additive' && (e.id === changedId || e.enabled))
+        .map(e => e.id);
+
+    // Anything with no recorded history ranks oldest, so it goes first.
+    const byAge = [...live].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    const evict = byAge.slice(0, Math.max(0, byAge.length - cap));
+
+    stacks[key] = order.filter(id => !evict.includes(id));
+    save();
+
+    return Object.fromEntries(evict.map(id => [id, false]));
 }
 
 /** Turning on any additive in a section with a ✚✚ entry also turns that on. */
@@ -237,6 +293,23 @@ async function refreshCounts(model) {
     }
     const totalEl = document.getElementById('coldopen_total');
     if (totalEl) totalEl.textContent = `≈${total} tokens enabled`;
+    refreshCaps(model);
+}
+
+/** Live "2/2" chips on capped groups, flagged when the preset arrives over cap. */
+function refreshCaps(model) {
+    for (const group of model.flatMap(s => s.groups)) {
+        const cap = groupCap(group);
+        if (!cap) continue;
+        const chip = document.querySelector(`[data-co-cap="${CSS.escape(group.raw || group.name)}"]`);
+        if (!chip) continue;
+        const on = capEnabled(group).length;
+        chip.textContent = `${on}/${cap}`;
+        chip.classList.toggle('coldopen-cap-over', on > cap);
+        chip.title = on > cap
+            ? `${on} enabled, ${cap} allowed. Turn one off, or enable another and the oldest drops.`
+            : `Stack at most ${cap}. Enabling one more drops whichever you enabled longest ago.`;
+    }
 }
 
 // ─────────────────────────────────────────────────────────── UI
@@ -254,6 +327,60 @@ function el(tag, cls, text) {
  * put it back — and a rebuild happens on every toggle.
  */
 const openSections = new Set();
+
+// ─────────────────────────────────────────────────────────── loadout carry
+
+const presetName = () => ctx().chatCompletionSettings?.preset_settings_openai || '';
+
+/**
+ * Snapshot what you have switched on, keyed by identifier. Identifiers survive
+ * COLD OPEN version bumps intact — v1.20 → v1.21 renamed nothing and removed
+ * nothing — so they are the stable join key across an upgrade. Names are kept
+ * only so the diff can name what vanished.
+ */
+function snapshotLoadout(model) {
+    const s = settings();
+    s.loadout = {
+        preset: presetName(),
+        entries: Object.fromEntries(allEntries(model)
+            .filter(e => e.kind !== 'structural' && !e.marker)
+            .map(e => [e.id, { on: e.enabled, name: e.name }])),
+    };
+    save();
+}
+
+/**
+ * What a previous preset's loadout would change here. Null when there is
+ * nothing to offer — same preset, no overlap, or your selections already match.
+ */
+function pendingCarry(model) {
+    const prev = settings().loadout;
+    if (!prev?.entries || prev.preset === presetName()) return null;
+
+    const here = new Map(allEntries(model).map(e => [e.id, e]));
+    const shared = Object.keys(prev.entries).filter(id => here.has(id));
+    if (!shared.length) return null;
+
+    const differing = shared.filter(id => {
+        const e = here.get(id);
+        return e.kind !== 'structural' && !e.marker && e.enabled !== prev.entries[id].on;
+    });
+    if (!differing.length) return null;
+
+    return {
+        from: prev.preset,
+        differing,
+        added: [...here.keys()].filter(id => !(id in prev.entries)),
+        gone: Object.keys(prev.entries).filter(id => !here.has(id))
+            .map(id => prev.entries[id].name),
+    };
+}
+
+/** Stop offering the carry without applying it: adopt what is loaded now. */
+function dismissCarry(model) {
+    snapshotLoadout(model);
+    renderPanel();
+}
 
 /**
  * Identity of the panel's *shape* — sections, groups, entry ids. Enabled
@@ -305,6 +432,10 @@ function renderPanel() {
     }
     lastSignature = signature(model);
     if (scroller) requestAnimationFrame(() => { scroller.scrollTop = scrollTop; });
+
+    if (!settings().loadout) snapshotLoadout(model);
+    const carry = pendingCarry(model);
+    if (carry) host.append(renderCarry(carry, model));
 
     // toolbar
     const bar = el('div', 'coldopen-bar');
@@ -361,10 +492,16 @@ function renderPanel() {
         for (const group of section.groups) {
             const gEl = el('div', 'coldopen-group');
             const gh = el('div', 'coldopen-group-head');
-            gh.append(el('span', null, group.name));
-            const radios = group.entries.filter(e => e.kind === 'radio');
-            if (radios.length) gh.append(el('small', 'coldopen-hint', 'pick one'));
-            gh.append(el('span', null, ''));
+            gh.append(el('span', 'coldopen-group-name', group.name));
+
+            const cap = groupCap(group);
+            if (cap) {
+                const chip = el('small', 'coldopen-cap');
+                chip.setAttribute('data-co-cap', group.raw || group.name);
+                gh.append(chip);
+            } else if (group.entries.some(e => e.kind === 'radio')) {
+                gh.append(el('small', 'coldopen-hint', 'pick one'));
+            }
             gEl.append(gh);
             for (const item of group.entries) gEl.append(renderEntry(item, group, model));
             body.append(gEl);
@@ -375,6 +512,50 @@ function renderPanel() {
     }
 
     refreshCounts(model);
+}
+
+/** The upgrade banner: what your last preset had on, and what moved. */
+function renderCarry(carry, model) {
+    const box = el('div', 'coldopen-carry');
+
+    const head = el('div', 'coldopen-carry-head');
+    head.append(el('i', 'fa-solid fa-arrow-right-arrow-left coldopen-carry-icon'));
+    head.append(el('b', null, carry.from ? `Loadout from ${carry.from}` : 'Loadout from a previous preset'));
+    box.append(head);
+
+    const bits = [`${carry.differing.length} to restore`];
+    if (carry.added.length) bits.push(`${carry.added.length} new here`);
+    if (carry.gone.length) bits.push(`${carry.gone.length} gone`);
+    box.append(el('div', 'coldopen-carry-line', bits.join('  ·  ')));
+
+    if (carry.gone.length) {
+        const names = carry.gone.slice(0, 4).join(', ') + (carry.gone.length > 4 ? '…' : '');
+        box.append(el('small', 'coldopen-carry-gone', `No longer in this preset: ${names}`));
+    }
+
+    const row = el('div', 'coldopen-carry-row');
+
+    const apply = el('div', 'menu_button coldopen-btn', 'Restore my selection');
+    apply.title = 'Re-apply what you had switched on, for every entry that still exists here.';
+    apply.addEventListener('click', async () => {
+        const fresh = buildModel();
+        if (!fresh) return;
+        const prev = settings().loadout?.entries || {};
+        const here = new Set(allEntries(fresh).map(e => e.id));
+        const changes = {};
+        for (const id of carry.differing) if (here.has(id) && prev[id]) changes[id] = prev[id].on;
+        await applyChanges(changes);
+        snapshotLoadout(buildModel() || fresh);
+        renderPanel();
+    });
+
+    const skip = el('div', 'menu_button coldopen-btn coldopen-btn-sm', 'Keep as-is');
+    skip.title = 'Adopt what this preset shipped with and stop asking.';
+    skip.addEventListener('click', () => dismissCarry(model));
+
+    row.append(apply, skip);
+    box.append(row);
+    return box;
 }
 
 function renderEntry(item, group, model) {
@@ -411,6 +592,10 @@ function renderEntry(item, group, model) {
         } else {
             const changes = { [item.id]: box.checked };
             Object.assign(changes, dependencyChanges(fresh, item.id, box.checked));
+            if (group && box.checked) {
+                const g = fresh.flatMap(s => s.groups).find(x => x.name === group.name);
+                Object.assign(changes, capChanges(g || group, item.id));
+            }
             await applyChanges(changes);
         }
     });
@@ -434,7 +619,7 @@ function settings() {
     const c = ctx();
     const s = (c.extensionSettings[KEY] ??= {});
     if (typeof s.locked !== 'boolean') s.locked = true;
-    s.window ??= { x: null, y: null, w: 380, h: 540, open: false };
+    s.window ??= { x: null, y: null, open: false };
     s.launcher ??= { x: null, y: null };
     s.open ??= [];
     s.version = 2;
@@ -589,20 +774,8 @@ function buildWindow() {
     win.append(head, body);
     document.body.append(win);
 
-    win.style.width = `${s.window.w}px`;
-    win.style.height = `${s.window.h}px`;
     if (s.window.x != null) place(win, s.window.x, s.window.y);
-
     draggable(head, win, s.window);
-
-    // CSS resize writes straight to the element; mirror it into settings.
-    new ResizeObserver(() => {
-        if (win.style.display === 'none') return;
-        s.window.w = win.offsetWidth;
-        s.window.h = win.offsetHeight;
-        save();
-    }).observe(win);
-
     return win;
 }
 
@@ -651,8 +824,6 @@ function mountDrawerStub() {
     reset.addEventListener('click', () => {
         const s = settings();
         s.window.x = s.window.y = s.launcher.x = s.launcher.y = null;
-        s.window.w = 380;
-        s.window.h = 540;
         save();
         for (const id of [WINDOW, LAUNCHER]) document.getElementById(id)?.remove();
         buildLauncher();
