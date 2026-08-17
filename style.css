@@ -1,0 +1,101 @@
+.coldopen-root .inline-drawer-content { padding-top: 4px; }
+
+.coldopen-empty {
+    opacity: .65;
+    font-size: .9em;
+    padding: 8px 4px;
+    line-height: 1.5;
+}
+
+.coldopen-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 0 8px;
+    border-bottom: 1px solid rgba(128, 128, 128, .25);
+}
+
+.coldopen-bar-label {
+    font-size: .72em;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    opacity: .55;
+    margin-right: 2px;
+}
+
+.coldopen-bar-label:not(:first-child) { margin-left: 10px; }
+
+.coldopen-btn { padding: 2px 10px; font-size: .85em; }
+.coldopen-btn-sm { padding: 2px 7px; font-size: .78em; }
+
+.coldopen-total {
+    font-size: .78em;
+    opacity: .6;
+    padding: 6px 2px 2px;
+    font-family: ui-monospace, Menlo, monospace;
+}
+
+.coldopen-section { margin: 2px 0; }
+
+.coldopen-count {
+    margin-left: auto;
+    margin-right: 8px;
+    font-size: .75em;
+    opacity: .5;
+    font-family: ui-monospace, Menlo, monospace;
+}
+
+.coldopen-group {
+    margin: 6px 0 10px;
+    padding-left: 8px;
+    border-left: 2px solid rgba(128, 128, 128, .22);
+}
+
+.coldopen-group-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: .8em;
+    font-weight: 600;
+    opacity: .75;
+    margin-bottom: 3px;
+}
+
+.coldopen-hint {
+    font-size: .85em;
+    font-weight: 400;
+    opacity: .6;
+    font-style: italic;
+}
+
+.coldopen-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 2px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: .92em;
+}
+
+.coldopen-row:hover { background: rgba(128, 128, 128, .12); }
+
+.coldopen-row input { margin: 0; flex: none; cursor: pointer; }
+
+.coldopen-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.coldopen-locked { cursor: default; opacity: .45; }
+.coldopen-locked:hover { background: none; }
+.coldopen-lock { font-size: .7em; width: 13px; text-align: center; }
+
+.coldopen-depend .coldopen-name { font-weight: 600; }
+
+.coldopen-tag {
+    font-size: .7em;
+    opacity: .55;
+    border: 1px solid rgba(128, 128, 128, .35);
+    border-radius: 8px;
+    padding: 0 6px;
+    white-space: nowrap;
+}

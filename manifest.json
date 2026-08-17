@@ -1,0 +1,13 @@
+{
+    "display_name": "COLD OPEN Companion",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Ethan Young",
+    "version": "0.1.0",
+    "homePage": "https://github.com/GrayAegis/cold-open",
+    "auto_update": true,
+    "description": "Turns the COLD OPEN preset's prompt list into a real control panel: enforced radio groups, dependency handling, tier presets, and live token estimates."
+}
