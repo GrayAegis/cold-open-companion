@@ -518,6 +518,37 @@ function renderPanel() {
     refreshCounts(model);
 }
 
+/**
+ * A hover summary built from the entry's real prompt text rather than a
+ * hand-written blurb, so it cannot drift as the preset changes. Most COLD OPEN
+ * modules wrap their payload in {{addvar::var::…}}, which is plumbing rather
+ * than content — unwrap it, drop the XML scaffolding, and keep {{user}} and
+ * friends intact because those are part of what the entry actually says.
+ */
+const PAYLOAD = /\{\{(?:add|set)var::[^:]+::([\s\S]*?)\}\}\s*(?:\{\{trim\}\})?\s*$/;
+
+function describe(item) {
+    if (item.marker) {
+        return 'SillyTavern marker — the slot where ST injects its own block (chat history, world info). No text of its own.';
+    }
+
+    const raw = item.content || '';
+    const m = PAYLOAD.exec(raw.trim());
+    const text = (m ? m[1] : raw)
+        .replace(/\{\{trim\}\}/g, '')
+        .replace(/<\/?[a-z_][\w-]*\s*\/?>/gi, ' ')   // <directive>, <tracker_plot> …
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!text) return 'Carries no text of its own — structural plumbing or a passthrough slot.';
+
+    const tokens = Math.round(text.length / 4);
+    const clipped = text.length > 300
+        ? text.slice(0, 299).replace(/\s+\S*$/, '') + '…'
+        : text;
+    return `≈${tokens} tok — ${clipped}`;
+}
+
 /** The upgrade banner: what your last preset had on, and what moved. */
 function renderCarry(carry, model) {
     const box = el('div', 'coldopen-carry');
@@ -572,9 +603,10 @@ function renderEntry(item, group, model) {
 
     if (item.kind === 'structural' || item.marker || isPhiPassthrough) {
         row.classList.add('coldopen-locked');
-        row.title = isPhiPassthrough
+        const why = isPhiPassthrough
             ? 'Locked on purpose: this empty slot is what lets your character cards’ own post-history instructions through. Disabling it kills that field on every card.'
             : 'Structural — the preset needs this where it is.';
+        row.title = `${why}\n\n${describe(item)}`;
         row.append(el('i', 'fa-solid fa-lock coldopen-lock'));
         row.append(el('span', 'coldopen-name', item.name));
         if (isPhiPassthrough) row.append(el('small', 'coldopen-tag', 'card PHI'));
@@ -604,6 +636,7 @@ function renderEntry(item, group, model) {
         }
     });
 
+    row.title = describe(item);
     row.append(box);
     row.append(el('span', 'coldopen-name', item.name));
     if (item.kind === 'depend') {
