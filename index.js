@@ -168,6 +168,18 @@ function capEnabled(group) {
 }
 
 /**
+ * A cap only means anything where it can actually bind — on a group with two
+ * or more additives competing for the slots. `░ ⑫ Reasoning — at most ONE`
+ * holds two radios and a single additive: there the phrase describes the radio
+ * choice, which radio behaviour already enforces, and a chip counting only
+ * additives would read 0/1 while a CoT is plainly selected.
+ */
+function capBinds(group) {
+    return !!groupCap(group)
+        && group.entries.filter(e => e.kind === 'additive').length > 1;
+}
+
+/**
  * Enabling past the cap evicts the *least recently enabled* member rather than
  * refusing the click — picking a third lens should give you the third lens.
  * Recency is remembered per group so the eviction order survives a reload.
@@ -364,8 +376,8 @@ function refreshToolbar(model) {
 /** Live "2/2" chips on capped groups, flagged when the preset arrives over cap. */
 function refreshCaps(model) {
     for (const group of model.flatMap(s => s.groups)) {
+        if (!capBinds(group)) continue;
         const cap = groupCap(group);
-        if (!cap) continue;
         const chip = document.querySelector(`[data-co-cap="${CSS.escape(group.raw || group.name)}"]`);
         if (!chip) continue;
         const on = capEnabled(group).length;
@@ -570,8 +582,7 @@ function renderPanel() {
             const gh = el('div', 'coldopen-group-head');
             gh.append(el('span', 'coldopen-group-name', group.name));
 
-            const cap = groupCap(group);
-            if (cap) {
+            if (capBinds(group)) {
                 const chip = el('small', 'coldopen-cap');
                 chip.setAttribute('data-co-cap', group.raw || group.name);
                 gh.append(chip);
