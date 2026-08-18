@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "Ethan Young",
-    "version": "0.4.1",
+    "version": "0.5.0",
     "homePage": "https://github.com/GrayAegis/cold-open",
     "auto_update": true,
     "description": "Turns the COLD OPEN preset's prompt list into a real control panel: a floating window, enforced radio groups, dependency handling, tier presets, live token estimates, and a lock that keeps the native Prompt Manager from breaking the grammar."

@@ -521,6 +521,9 @@ function renderPanel() {
     const carry = pendingCarry(model);
     if (carry) host.append(renderCarry(carry, model));
 
+    const board = renderBoard();
+    if (board) host.append(board);
+
     // toolbar
     const bar = el('div', 'coldopen-bar');
     bar.append(el('span', 'coldopen-bar-label', 'Tier'));
@@ -603,6 +606,178 @@ function renderPanel() {
     refreshCaps(model);
     refreshToolbar(model);
     refreshCounts(model);
+}
+
+
+// ─────────────────────────────────────────────────────────── tracker board
+
+/**
+ * Read-only view of what the trackers currently hold, rebuilt from the chat
+ * rather than from the preset. Splitting on "|" instead of matching a shape
+ * means every malformed line the renders defend against still parses here:
+ * a missing closing bracket, a merged field, "trust 6" written into a value.
+ */
+const TRACKER = /\[(BOND|PLOT|SCENE|STATE)\|([^\]\r\n]*)\]?/g;
+const STATUS = /simmering|moving|cresting/i;
+
+const firstInt = v => {
+    const m = /-?\d+/.exec(v ?? '');
+    return m ? parseInt(m[0], 10) : null;
+};
+
+function parseTrackers(text) {
+    const out = [];
+    for (const m of String(text || '').matchAll(TRACKER)) {
+        out.push({ tag: m[1], fields: m[2].split('|').map(x => x.trim()) });
+    }
+    return out;
+}
+
+const BOND_AXES = ['trust', 'respect', 'friction', 'attraction'];
+
+/** Walk the chat oldest-first so the last write per entity wins. */
+function readBoard() {
+    const chat = ctx().chat;
+    if (!Array.isArray(chat)) return null;
+
+    const bonds = new Map();
+    const threads = new Map();
+    let replies = 0;
+
+    for (const msg of chat) {
+        if (!msg || msg.is_user || msg.is_system) continue;
+        const lines = parseTrackers(msg.mes);
+        if (lines.length) replies++;
+
+        for (const { tag, fields } of lines) {
+            if (tag === 'BOND' && fields.length >= 5) {
+                const name = fields[0] || '—';
+                const rec = bonds.get(name) || { name, series: [[], [], [], []] };
+                rec.values = fields.slice(1, 5).map(firstInt);
+                rec.wants = fields[5] || '';
+                rec.debt = fields[7] || fields[6] || '';
+                rec.values.forEach((v, i) => { if (v !== null) rec.series[i].push(v); });
+                bonds.set(name, rec);
+            }
+            if (tag === 'PLOT' && fields.length >= 3) {
+                const name = fields[0] || '—';
+                const rec = threads.get(name) || { name };
+                rec.status = (fields.find(f => STATUS.test(f)) || '').toLowerCase();
+                const tail = fields.slice(-2).map(firstInt);
+                const fused = fields.length >= 5 && tail.every(v => v !== null);
+                rec.filled = fused ? tail[0] : null;
+                rec.total = fused ? tail[1] : null;
+                threads.set(name, rec);
+            }
+        }
+    }
+    if (!bonds.size && !threads.size) return null;
+    return { bonds: [...bonds.values()], threads: [...threads.values()], replies };
+}
+
+/** Everything the preset can only ask for, checked here in code. */
+function boardIssues(board) {
+    const out = [];
+    for (const b of board.bonds) {
+        b.values.forEach((v, i) => {
+            if (v !== null && (v < 0 || v > 10)) {
+                out.push(`${b.name}: ${BOND_AXES[i]} is ${v}, outside 0-10`);
+            }
+        });
+    }
+    if (board.bonds.length > 6) out.push(`${board.bonds.length} bond lines — the module caps this at six`);
+
+    const fused = board.threads.filter(t => t.filled !== null);
+    for (const t of fused) {
+        if (t.filled > t.total) out.push(`${t.name}: fuse reads ${t.filled}/${t.total}`);
+    }
+    if (fused.length > 2) out.push(`${fused.length} threads carry a fuse — the module caps this at two`);
+    if (board.threads.length > 4) out.push(`${board.threads.length} live threads — the module caps this at four`);
+    return out;
+}
+
+/** How often a value has moved recently: the drift question, answered. */
+function moves(series, window = 8) {
+    const tail = series.slice(-window);
+    let n = 0;
+    for (let i = 1; i < tail.length; i++) if (tail[i] !== tail[i - 1]) n++;
+    return { moved: n, of: Math.max(0, tail.length - 1), tail };
+}
+
+function renderBoard() {
+    const board = readBoard();
+    if (!board) return null;
+
+    const drawer = el('div', 'inline-drawer coldopen-section coldopen-board');
+    const head = el('div', 'inline-drawer-toggle inline-drawer-header');
+    head.append(el('b', null, 'Tracker board'));
+    const issues = boardIssues(board);
+    const flag = el('small', issues.length ? 'coldopen-cap coldopen-cap-over' : 'coldopen-count',
+        issues.length ? `${issues.length} to check` : `${board.bonds.length}b · ${board.threads.length}t`);
+    head.append(flag);
+    const icon = el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down');
+    head.append(icon);
+
+    const body = el('div', 'inline-drawer-content');
+    const NAME = 'Tracker board';
+    head.addEventListener('click', () => {
+        if (openSections.has(NAME)) openSections.delete(NAME); else openSections.add(NAME);
+        settings().open = [...openSections];
+        save();
+    });
+    if (openSections.has(NAME)) {
+        body.style.display = 'block';
+        icon.className = 'inline-drawer-icon fa-solid fa-circle-chevron-up up';
+    }
+
+    for (const msg of issues) {
+        const row = el('div', 'coldopen-board-issue');
+        row.append(el('i', 'fa-solid fa-triangle-exclamation'), el('span', null, msg));
+        body.append(row);
+    }
+
+    if (board.bonds.length) {
+        body.append(el('div', 'coldopen-board-head', 'Bonds'));
+        for (const b of board.bonds) {
+            const row = el('div', 'coldopen-board-row');
+            row.append(el('span', 'coldopen-board-name', b.name));
+            const vals = el('span', 'coldopen-board-vals');
+            b.values.forEach((v, i) => {
+                const m = moves(b.series[i]);
+                const cell = el('span', 'coldopen-board-cell', v === null ? '–' : String(v));
+                if (m.of >= 3 && m.moved >= m.of - 1) cell.classList.add('coldopen-board-jitter');
+                cell.title = `${BOND_AXES[i]} — ${m.tail.join(' → ') || 'no history'}` +
+                    (m.of ? `\nmoved ${m.moved} of the last ${m.of} times this line appeared` : '');
+                vals.append(cell);
+            });
+            row.append(vals);
+            if (b.debt && b.debt !== '-' && b.debt !== '—') {
+                row.append(el('small', 'coldopen-board-debt', b.debt));
+            }
+            body.append(row);
+        }
+    }
+
+    if (board.threads.length) {
+        body.append(el('div', 'coldopen-board-head', 'Threads'));
+        for (const t of board.threads) {
+            const row = el('div', 'coldopen-board-row');
+            row.append(el('span', 'coldopen-board-name', t.name));
+            if (t.status) row.append(el('small', 'coldopen-board-status', t.status));
+            if (t.filled !== null) {
+                const fuse = el('small', 'coldopen-board-fuse', `${t.filled}/${t.total}`);
+                if (t.filled > t.total) fuse.classList.add('coldopen-board-jitter');
+                row.append(fuse);
+            }
+            body.append(row);
+        }
+    }
+
+    body.append(el('small', 'coldopen-board-note',
+        `Read from ${board.replies} replies carrying tracker lines. Hover a number for its history. Nothing here is written back — the preset stays the source of truth.`));
+
+    drawer.append(head, body);
+    return drawer;
 }
 
 /**
@@ -1010,6 +1185,10 @@ function mountDrawerStub() {
     };
     for (const name of ['OAI_PRESET_CHANGED_AFTER', 'PRESET_CHANGED', 'CHAT_CHANGED', 'SETTINGS_UPDATED', 'APP_READY']) {
         if (t[name]) ev.on(t[name], refresh);
+    }
+    // The board is derived from chat, so it has its own reasons to redraw.
+    for (const name of ['MESSAGE_RECEIVED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_UPDATED']) {
+        if (t[name]) ev.on(t[name], () => { if (settings().window.open) renderPanel(); });
     }
 
     window.addEventListener('resize', () => {

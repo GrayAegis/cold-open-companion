@@ -326,3 +326,87 @@
     opacity: .8;
     margin-left: 2px;
 }
+
+/* ─────────────────────────────────────────── tracker board */
+
+.coldopen-board-head {
+    font-size: .72em;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    opacity: .5;
+    padding: 8px 0 3px;
+}
+
+.coldopen-board-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px 0;
+    font-size: .9em;
+}
+
+.coldopen-board-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.coldopen-board-vals { display: flex; gap: 3px; flex: none; }
+
+.coldopen-board-cell {
+    min-width: 20px;
+    text-align: center;
+    font: 600 .82em/1.5 ui-monospace, Menlo, monospace;
+    border-radius: 3px;
+    background: rgba(128, 128, 128, .16);
+    cursor: help;
+}
+
+.coldopen-board-jitter {
+    color: var(--golden, #d9a441);
+    background: rgba(217, 164, 65, .18);
+}
+
+.coldopen-board-status,
+.coldopen-board-fuse {
+    flex: none;
+    font: .72em ui-monospace, Menlo, monospace;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    opacity: .6;
+}
+
+.coldopen-board-fuse { opacity: .8; }
+
+.coldopen-board-debt {
+    flex: none;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: .72em;
+    opacity: .5;
+    font-style: italic;
+}
+
+.coldopen-board-issue {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    font-size: .8em;
+    line-height: 1.5;
+    padding: 3px 0;
+    color: var(--golden, #d9a441);
+}
+
+.coldopen-board-issue i { font-size: .85em; opacity: .8; }
+
+.coldopen-board-note {
+    display: block;
+    opacity: .45;
+    font-size: .72em;
+    line-height: 1.5;
+    padding-top: 8px;
+}
