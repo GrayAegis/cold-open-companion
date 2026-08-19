@@ -651,11 +651,16 @@ function readBoard() {
 
         for (const { tag, fields } of lines) {
             if (tag === 'BOND' && fields.length >= 5) {
-                const name = fields[0] || '—';
+                // A pairwise bond names its target second, shifting every value
+                // right by one: [BOND|Chibiusa|Itsuki|2|1|1|0|...]. The tell is
+                // a second field with no digit in it, where trust would be.
+                const paired = fields.length >= 6 && firstInt(fields[1]) === null;
+                const at = paired ? 2 : 1;
+                const name = paired ? `${fields[0]} → ${fields[1]}` : (fields[0] || '—');
                 const rec = bonds.get(name) || { name, series: [[], [], [], []] };
-                rec.values = fields.slice(1, 5).map(firstInt);
-                rec.wants = fields[5] || '';
-                rec.debt = fields[7] || fields[6] || '';
+                rec.values = fields.slice(at, at + 4).map(firstInt);
+                rec.wants = fields[at + 4] || '';
+                rec.debt = fields[at + 6] || fields[at + 5] || '';
                 rec.values.forEach((v, i) => { if (v !== null) rec.series[i].push(v); });
                 bonds.set(name, rec);
             }
